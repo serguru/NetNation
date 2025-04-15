@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "NetNationExercise": {
+      "commandName": "Project",
+      "commandLineArgs": "C:\\Projects\\NetNation\\NetNationExercise\\Task\\Sample_Report.csv\r\nC:\\Projects\\NetNation\\NetNationExercise\\Task\\typemap.json"
+    }
+  }
+}
