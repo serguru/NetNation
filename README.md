@@ -24,6 +24,12 @@ You can type NetNationExercise and hit Enter to see a use propmpt.
 
 Generated output files can be found in ./Generated files folder.
 
+Unit testing
+============
+This program can be automatically unit tested, for example, with MSTests. 
+The corresponding project NetNationExercise.Tests and a few tests are included.
+
+
 Additional Criteria for Evaluation question in Usage Translator.docx
 ======================================================================
 To protect INSERT SQL queries from exploitation, you can put them in a stored 
