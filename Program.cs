@@ -98,7 +98,7 @@ public class Program
     }
 
     /// <summary>
-    /// Converts nullable Guid to string?
+    /// Converts nullable Guid to string?, removes non alphanumeric characters
     /// </summary>
     /// <param name="guid"></param>
     /// <returns></returns>
