@@ -1,13 +1,11 @@
-﻿using System.Data;
-using System.Diagnostics;
-using System.IO;
-using System.Numerics;
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Microsoft.Extensions.Configuration;
+using System.Text.RegularExpressions;
+using System.Text;
 
 public class Program
 {
-
+    #region helpers
     private static string ValidateAndSplit(string row, int rowNUmber, out string[] arr)
     {
         // Ensure 'arr' is assigned before returning
@@ -70,9 +68,56 @@ public class Program
         throw new InvalidDataException($"Wrong integer encountered: '{s}'");
     }
 
+    private static string Guid2Str(Guid guid)
+    {
+        // Leave alphanumeric only
+        string s = Regex.Replace(guid.ToString(), "[^a-zA-Z0-9]", "");
+        if (s.Length == 32)
+        {
+            return s;
+        }
+        if (s.Length > 32)
+        {
+            return s.Substring(32);
+        }
+        return s.PadRight(32, '0');
+    }
+
+    static Dictionary<string, int> countToUsage = new Dictionary<string, int>()
+        {
+            { "EA000001GB0O", 1000 },
+            { "PMQ00005GB0R", 5000 },
+            { "SSX006NR", 1000 },
+            { "SPQ00001MB0R", 2000 }
+        };
+
+
+    // itemCount converter
+    public static int ConvertItemCount(string partNumber, int itemCount)
+    {
+
+        if (!countToUsage.ContainsKey(partNumber))
+        {
+            return itemCount;
+        }
+
+        return itemCount / countToUsage[partNumber];
+
+    }
+
+    #endregion
 
     public static void Main(string[] args)
     {
+        if (args.Length == 0 || args[0].Equals("help", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine("This program is for converting csv data into two insert SQL statemerts.");
+            Console.WriteLine("Command: NetNationExercise <path-to-csv-file> <path-to-mapping-json-file>.");
+            return;
+        }
+
+        Console.WriteLine("Working...");
+
         // Check input
         if (args.Length != 2)
         {
@@ -93,102 +138,140 @@ public class Program
 
         // Read mapping file
         string jsonString = File.ReadAllText(mappingPath);
-        Dictionary<string, string> mappingDictionary;
-        try
-        {
-            mappingDictionary = JsonConvert.DeserializeObject<Dictionary<string, string>>(jsonString);
-
-        }
-        catch (Exception e)
-        {
-            throw new InvalidDataException($"Failed parsing {mappingPath} mapping json file with message {e.Message}");
-        }
-
-        if (mappingDictionary == null)
-        {
-            throw new InvalidDataException($"{mappingPath} is null");
-        }
-
+        Dictionary<string, string> mappingDictionary = JsonConvert.DeserializeObject<Dictionary<string, string>>(jsonString)
+                            ?? throw new InvalidDataException($"Failed to deserialize {mappingPath} mapping json file. The result is null.");
 
         List<string> logMessages = new List<string>();
 
+        var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
 
+        // Build configuration
         var config = new ConfigurationBuilder()
             .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.json", optional: false)
+            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+            .AddJsonFile($"appsettings.{environment}.json", optional: true, reloadOnChange: true)
+            .AddEnvironmentVariables()
             .Build();
 
-        // With the following code:
         int[] excludePartnerIds = config.GetSection("ExcludePartnerIds").Get<int[]>() ?? [];
 
+        StringBuilder sbChargeable = new StringBuilder("insert into chargeable (partnerID, product, partnerPurchasedPlanID, [plan], usage) values\n");
 
-        // Create a Data Table
-        DataTable table = new DataTable();
-        table.Columns.Add("PartnerID", typeof(int));        // 0
-        table.Columns.Add("partnerGuid", typeof(Guid));
-        table.Columns.Add("accountid", typeof(int));
-        table.Columns.Add("accountGuid", typeof(Guid));
-        table.Columns.Add("username", typeof(string));
-        table.Columns.Add("domains", typeof(string));
-        table.Columns.Add("itemname", typeof(string));
-        table.Columns.Add("plan", typeof(string));
-        table.Columns.Add("itemType", typeof(int));
-        table.Columns.Add("PartNumber", typeof(string));
-        table.Columns.Add("itemCount", typeof(int));        //10
+        // A collection to build the 'domains' insert statement
+        Dictionary<string, string> domains = new();
 
-        // Read the data file, parse field values, populate the data table
-        int index = 0;
+        // constants
+        const string comma = ",";
+        const string singleQuote = "'";
+
+
+        // Read the data file, parse field values, append sbChargeable
+        int index = -1;
         foreach (var row in File.ReadLines(dataPath))
         {
+            index++;
+
             string message = ValidateAndSplit(row, index, out string[] arr);
             if (message != "")
             {
                 throw new InvalidDataException(message);
             }
 
-            int partnerId = TryParseInt(arr[0]);
-
-            if (index >= 1 && !excludePartnerIds.Contains(partnerId))
+            if (index < 1)
             {
-                int itemCount = TryParseInt(arr[10]);
+                continue;
+            }
 
-                if (String.IsNullOrEmpty(arr[9]))
-                {
-                    logMessages.Add($"Row #{index} was skipped because of missing PartNumber");
-                }
-                else if (itemCount <= 0)
-                {
-                    logMessages.Add($"Row #{index} was skipped because of non-positive itemCount");
-                }
-                else
-                {
-                    try
-                    {
-                        string mappedString = String.IsNullOrWhiteSpace(arr[9]) ? "" :
-                            mappingDictionary[arr[9]] ?? throw new InvalidDataException($"Failed mapping '{arr[9]}', row #{index}");
+            int partnerId = TryParseInt(arr[0]);
+            if (excludePartnerIds.Contains(partnerId))
+            {
+                continue;
+            }
 
-                        table.Rows.Add
-                            (
-                                partnerId,
-                                TryParseGuid(arr[1]),
-                                TryParseInt(arr[2]),
-                                TryParseGuid(arr[3]), // accountGuid
-                                arr[4],
-                                arr[5],
-                                arr[6],
-                                arr[7],
-                                TryParseInt(arr[8]),
-                                mappedString,
-                                itemCount
-                            );
-                    }
-                    catch (Exception e)
+            int itemCount = TryParseInt(arr[10]);
+
+            if (String.IsNullOrEmpty(arr[9]))
+            {
+                logMessages.Add($"Row #{index} was skipped because of missing PartNumber");
+            }
+            else if (!mappingDictionary.ContainsKey(arr[9]))
+            {
+                logMessages.Add($"Row #{index} was skipped because of missing PartNumber '{arr[9]}'");
+            }
+            else if (itemCount <= 0)
+            {
+                logMessages.Add($"Row #{index} was skipped because of non-positive itemCount");
+            }
+            else
+            {
+                string partnerPurchasedPlanID = Guid2Str(TryParseGuid(arr[3]));
+                string domain = arr[5];
+                try
+                {
+                    sbChargeable.Append("(");
+                    sbChargeable.Append(partnerId);
+                    sbChargeable.Append(comma);
+                    sbChargeable.Append(singleQuote);
+                    sbChargeable.Append(mappingDictionary[arr[9]]);
+                    sbChargeable.Append(singleQuote);
+                    sbChargeable.Append(comma);
+                    sbChargeable.Append(singleQuote);
+                    sbChargeable.Append(partnerPurchasedPlanID);
+                    sbChargeable.Append(singleQuote);
+                    sbChargeable.Append(comma);
+                    sbChargeable.Append(TryParseInt(arr[8]));
+                    sbChargeable.Append(comma);
+                    sbChargeable.Append(ConvertItemCount(arr[9], itemCount));
+                    sbChargeable.Append("),\n");
+
+
+                    if (!domains.ContainsKey(domain))
                     {
-                        throw new InvalidDataException($"Error data parsing in a row {index} with message {e.Message}");
+                        domains.Add(domain, partnerPurchasedPlanID);
                     }
+                }
+                catch (Exception e)
+                {
+                    throw new InvalidDataException($"Error data parsing in a row {index} with message {e.Message}");
                 }
             }
-            index++;
         }
+
+        sbChargeable.Remove(sbChargeable.Length - 2, 2);
+        sbChargeable.Append(";");
+        string insertChargeable = sbChargeable.ToString();
+
+
+
+
+        StringBuilder sbDomains = new StringBuilder("insert into domains (domain, partnerPurchasedPlanID) values\n");
+
+        foreach (var item in domains)
+        {
+            sbDomains.Append("('");
+            sbDomains.Append(item.Key);
+            sbDomains.Append(singleQuote);
+            sbDomains.Append(comma);
+            sbDomains.Append(singleQuote);
+            sbDomains.Append(item.Value);
+            sbDomains.Append("'),\n");
+        }
+        sbDomains.Remove(sbDomains.Length - 2, 2);
+        sbDomains.Append(";");
+        string insertDomains = sbDomains.ToString();
+
+
+        const string s1 = "insert-chargeable.sql";
+        const string s2 = "insert-domains.sql";
+        const string s3 = "log-errors.txt";
+
+        File.WriteAllText(s1, insertChargeable);
+        File.WriteAllText(s2, insertDomains);
+        File.WriteAllLines(s3, logMessages);
+
+        Console.WriteLine($"Insert statements generated. Please see files {s1} and {s2}.");
+        Console.WriteLine($"Please find error messages in {s3}");
     }
 }
+
+
