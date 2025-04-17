@@ -170,7 +170,7 @@ public class Program
         // Check input
         if (args.Length != 2)
         {
-            throw new ArgumentException("Two input parameters required:\n\n1) path to data csv file and\n2) path to mapping json file\n\nExample: usagetranslator Sample_Report.csv typemap.json");
+            throw new ArgumentException("Two input parameters required:\n\n1) path to data csv file and\n2) path to mapping json file\n\nExample: NetNationExercise Sample_Report.csv typemap.json");
         }
 
         string dataPath = args[0];
@@ -230,9 +230,11 @@ public class Program
            10: itemCount    -> usage
         */
 
+        // Log itemCount running total
         var runningCounts = new List<(int RowNo, string Product, int ItemCount, int RunningTotal)>();
 
         int index = 0;
+        // Build chargeable INSERT
         foreach (var row in File.ReadLines(dataPath))
         {
             index++;
@@ -243,6 +245,7 @@ public class Program
                 throw new InvalidDataException(message);
             }
 
+            // Skip the header
             if (index == 1)
             {
                 continue;
@@ -256,34 +259,42 @@ public class Program
                 continue;
             }
 
+            // Slip rows with missing PartNumber
             if (String.IsNullOrEmpty(arr[9]))
             {
                 logMessages.Add($"Row #{index} was skipped because of missing PartNumber");
                 continue;
             }
 
+            // If the PartNumber is missing in typemap.json
+            // it is not possible to map it
             if (!mappingDictionary.ContainsKey(arr[9]))
             {
-                logMessages.Add($"Row #{index} was skipped because of missing PartNumber '{arr[9]}'");
+                logMessages.Add($"Row #{index} was skipped because of missing PartNumber '{arr[9]}' in '{mappingPath}'");
                 continue;
             }
 
             int? itemCount = TryParseInt(arr[10]);
-
+            // Slip rows with non-positive itemCount
             if (itemCount <= 0)
             {
                 logMessages.Add($"Row #{index} was skipped because of non-positive itemCount");
                 continue;
             }
 
+            // Convert PartnerID to string
             string partnerIdStr = partnerId.HasValue ? partnerId.Value.ToString() : nullString;
 
+            // Convert accountGuid to partnerPurchasedPlanID string
             string? partnerPurchasedPlanID = Guid2Str(TryParseGuid(arr[3]));
 
+            // Convert itemCount to usage
             int? usage = ConvertItemCount(arr[10], itemCount);
 
+            // Convert usage to usageStr
             string usageStr = usage.HasValue ? usage.Value.ToString() : nullString;
 
+            // Map PartNumber to product
             string? product = mappingDictionary[arr[9]];
 
             try
@@ -347,12 +358,13 @@ public class Program
                 throw new InvalidDataException($"Error data parsing in a row {index} with message {e.Message}");
             }
 
+            // Add itemCount to calculate the running total later
             if (!String.IsNullOrWhiteSpace(product) && itemCount.HasValue)
             {
                 runningCounts.Add((index, product, itemCount.Value, 0));
             }
 
-
+            // Add domains
             string domain = arr[5];
             if (String.IsNullOrWhiteSpace(domain))
             {
@@ -364,10 +376,12 @@ public class Program
             }
         }
 
+        // Replace trailing ',\n' with ';'
         sbChargeable.Remove(sbChargeable.Length - 2, 2);
         sbChargeable.Append(";");
-        string insertChargeable = sbChargeable.ToString();
 
+        // Build domains INSERT
+        string insertChargeable = sbChargeable.ToString();
         StringBuilder sbDomains = new StringBuilder("INSERT INTO domains (domain, partnerPurchasedPlanID) VALUES\n");
 
         foreach (var item in domains)
@@ -392,12 +406,12 @@ public class Program
         sbDomains.Append(";");
         string insertDomains = sbDomains.ToString();
 
-        List<string> runningCountsStr = new()
-        {
-        "Product, ItemCount, RunningTotal, RowNo"
-        };
-
-        runningCountsStr.AddRange(runningCounts
+        // Sort by product and rowno, calculate running totals for products,
+        // map to a string to be added to the success log
+        List<string> runningCountsStr =
+        [
+        "Product, ItemCount, RunningTotal, RowNo",
+        .. runningCounts
             .OrderBy(x => x.Product)
             .ThenBy(x => x.RowNo)
             .GroupBy(s => s.Product)
@@ -412,8 +426,11 @@ public class Program
                         });
             })
             .Select(x => $"{x.Product}, {x.ItemCount}, {x.cumulative}, {x.RowNo}")
-            .ToList());
+            .ToList(),
+        ];
 
+        // Gemerated files paths, they will be put
+        // to the NetNationExercise.exe containing folder
         const string s1 = "insert-chargeable.sql";
         const string s2 = "insert-domains.sql";
         const string s3 = "log-errors.txt";

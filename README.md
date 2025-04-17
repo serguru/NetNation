@@ -36,4 +36,11 @@ To protect INSERT SQL queries from exploitation, you can put them in a stored
 procedure. You give the user permission to execute this SP and do not give access to 
 the tables.
 
+Warning
+=======
+When using Microsoft SQL Server Management Studio to run generated INSERT 
+statements, you may encounter the message "The number of row value expressions in the 
+INSERT statement exceeds the maximum allowed number of 1000 row values".
 
+To work around this issue, you can modify this program to split the entire INSERT into 
+1000-row chunks.

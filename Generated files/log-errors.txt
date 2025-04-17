@@ -8108,7 +8108,7 @@ Row #13005 was skipped because of missing PartNumber
 Row #13006 was skipped because of missing PartNumber
 Row #13009 was skipped because of missing PartNumber
 Row #13010 was skipped because of missing PartNumber
-Row #13012 was skipped because of missing PartNumber 'MOL001NR'
+Row #13012 was skipped because of missing PartNumber 'MOL001NR' in 'C:\Projects\NetNation\NetNationExercise\Task\typemap.json'
 Row #13014 was skipped because of missing PartNumber
 Row #13015 was skipped because of missing PartNumber
 Row #13016 was skipped because of missing PartNumber
